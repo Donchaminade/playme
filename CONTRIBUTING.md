@@ -116,8 +116,9 @@ npm run dev   # puis ouvre http://localhost:5173/jeux/mon-jeu
 |---|---|
 | **Mode démo / grand écran** | Pris en charge par l'architecture : crée `Demo.tsx` (export par défaut) et renseigne `demo: lazy(() => import('./mon-jeu/Demo'))`. Exemple : `src/games/suis-l-ambulance/Demo.tsx` (raccourcis clavier, plein écran avec `requestFullscreen`). |
 | **Son** | Pas de module commun pour l'instant : `src/games/suis-l-ambulance/sound.ts` est propre au jeu ambulance (Web Audio, préférence dans `localStorage`). Tu peux t'en inspirer dans ton dossier ; pas de fichiers audio lourds. |
-| **Partie reproductible / défi partagé** | Rends ta logique déterministe avec un PRNG seedé : `mulberry32` est fourni dans `src/games/_modele/logic.ts` (et dans `suis-l-ambulance/logic.ts`). Même graine ⇒ même partie. Le lien de défi partagé (`?defi=`) commun à tous les jeux est **en préparation**. |
-| **Multijoueur local** | **En préparation** : aucun composant commun n'existe encore. Ne développe pas ton propre système sans en discuter dans une issue. |
+| **Partie reproductible / défi partagé** | Utilise `src/lib/defi.ts` : `nouvelleGraine()`, `graineDe(graine, k)` pour une graine par manche, `encoderDefi({ jeu, score, niveau, graine, prenom })` et `decoderDefi(code, jeu)` (renvoie `null` si le code est invalide). Lis `?defi=` avec `useSearchParams`, seede ton PRNG (`mulberry32`) avec la graine, puis compare les scores en fin de partie. Exemple : `suis-l-ambulance/Game.tsx` et `partie.ts`. |
+| **Partage** | `<BoutonPartage>` de `src/lib/Partage.tsx` (feuille native, sinon copier + réseaux + image). Les textes et l'image viennent de `src/lib/partage.ts` (`messagePartage`, `liensReseaux`, `imageScore`). Pas de clé ni de serveur. |
+| **Multijoueur local** | `src/lib/multijoueur.ts` fournit le délai (`DELAI_REPONSE` 5 s), `verrouiller` (1er appui seulement), `scoreManche` (100 + rapidité + bonus du plus rapide), `classer` (ex-aequo) et `niveauManche`. L'interface (pavés orientés, multi-touch en pointer events, clavier sur ordinateur, podium) est dans `suis-l-ambulance/Multi.tsx` : copie-la et adapte le pavé de réponse à ton jeu. |
 | **Paramètres d'URL** | Lis-les avec `useSearchParams` de `react-router-dom` (exemple : `?niveau=N` dans le jeu ambulance). |
 
 ## Règles de qualité

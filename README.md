@@ -21,14 +21,20 @@
 | Mode démo / grand écran avec compte à rebours pour le public | ✅ (Suis l'ambulance) |
 | Son (Web Audio, sans fichier) activable et mémorisé, vibration sur mobile | ✅ (Suis l'ambulance) |
 | Niveau Expert débloqué après le niveau 5 | ✅ (Suis l'ambulance) |
-| Multijoueur local (2–3 joueurs sur le même appareil) | 🚧 En préparation |
-| Défi partagé (lien `?defi=` qui rejoue la même partie) | 🚧 En préparation |
+| Limite de 5 s pour répondre (solo et multi) | ✅ (Suis l'ambulance) |
+| Multijoueur local (1 à 3 joueurs sur le même appareil, multi-touch) | ✅ (Suis l'ambulance) |
+| Partage du score (feuille native, sinon copier + WhatsApp, Facebook, X, Telegram, image 1080×1350) | ✅ |
+| Défi partagé (lien `?defi=` qui rejoue les mêmes mélanges) | ✅ (Suis l'ambulance) |
 
 <details><summary>Captures</summary>
 
 | Mobile | Mélange | Victoire | Mode démo |
 |---|---|---|---|
 | ![](shots/mobile-accueil.png) | ![](shots/mobile-jeu-melange.png) | ![](shots/mobile-victoire.png) | ![](shots/desktop-demo.png) |
+
+| Config multi | 2 joueurs | 3 joueurs | Podium | Partage | Défi |
+|---|---|---|---|---|---|
+| ![](shots/mobile-multi-config.png) | ![](shots/mobile-multi-2j-choix.png) | ![](shots/mobile-multi-3j-revelation.png) | ![](shots/mobile-multi-podium.png) | ![](shots/mobile-partage.png) | ![](shots/mobile-defi-banniere.png) |
 
 </details>
 
@@ -55,7 +61,8 @@ npm run preview   # sert dist/ sur http://127.0.0.1:4791
 | `/jeux/suis-l-ambulance?niveau=3` | Démarre directement au niveau N (le 6 seulement s'il est débloqué) |
 | `/jeux/suis-l-ambulance/demo` | Mode démo / grand écran |
 | `/jeux/suis-l-ambulance/demo?vitrine=1` | Vitrine : chaque motif une fois, avec son nom |
-| `?defi=…` | 🚧 En préparation (défi partagé) |
+| `/jeux/suis-l-ambulance?mode=multi` | Multijoueur local (2–3 joueurs) |
+| `/jeux/suis-l-ambulance?defi=CODE` | Défi : rejoue les mêmes mélanges qu'un ami et compare les scores |
 
 **Raccourcis du mode démo** : `Espace` pause · `→` manche suivante · `R` révéler · `F` plein écran.
 
@@ -89,12 +96,29 @@ Rafale = 2–3 vagues au moins 2× plus rapides puis respiration ; feinte = rale
 
 Lien animateur : `/jeux/suis-l-ambulance?niveau=N`.
 
+Diagonales : les deux paires de croisements d'un même bloc sont décalées d'environ 20 % dans le temps (jamais les 4 voitures au centre en même temps).
+
+### Multijoueur local
+
+Bouton « 👥 2–3 joueurs sur cet appareil » (ou `?mode=multi`). Écran de réglage : nombre de joueurs, prénom et couleur de chacun, 3, 5 ou 10 manches (5 par défaut, niveau croissant).
+
+- **Disposition** : plateau au centre, un pavé de 12 numéros par joueur, tourné vers lui. 2 joueurs : un en bas, un en haut (pivoté 180°). 3 joueurs : bas, haut, et bord droit (pivoté −90°), pour que chacun ait son bord et que les mains ne se croisent pas.
+- **Ordinateur** (écran ≥ 1024 px et souris) : pavés à gauche, à droite et en bas, sans rotation ; touches `1`…`=`, `Q`…`]`, `A`…`\` (libellés selon la disposition du clavier).
+- **Réponse** : 5 s visibles par joueur ; la réponse est verrouillée au premier appui et cachée jusqu'à la révélation (pointer events, multi-touch simultané).
+- **Points** : bonne réponse 100 + bonus rapidité jusqu'à 100 (`100 × (1 − t/5000)`), + 50 au(x) plus rapide(s) parmi les bonnes réponses (égalité exacte : tous). Faux ou hors délai : 0. Classement avec ex-aequo (1, 1, 3). Tableau des scores entre les manches, podium animé à la fin.
+
+### Partage et défi
+
+Bouton **Partager** sur l'écran de fin (solo et multi) et dans l'en-tête du jeu. Il utilise `navigator.share` (avec l'image si possible), sinon un panneau : copier le lien, WhatsApp, Facebook, X, Telegram, télécharger l'image du score (canvas 1080×1350). Aucun serveur, aucune clé.
+
+Le lien `?defi=CODE` contient score, niveau, prénom et une graine (base64url + somme de contrôle ; un code altéré est ignoré). L'ami voit un bandeau, joue les mêmes mélanges, puis une comparaison s'affiche. Les balises Open Graph / Twitter utilisent `public/og-image.png`.
+
 ## Structure du projet
 
 ```text
 playme/
 ├── index.html                 # point d'entrée, balises SEO
-├── public/                    # favicon, robots.txt
+├── public/                    # favicon, robots.txt, og-image.png
 ├── src/
 │   ├── main.tsx               # routes : /, /jeux/:slug, /jeux/:slug/demo
 │   ├── index.css              # Tailwind 4 + thème (couleurs nuit, taxi, sirene, orange ; police titre)
@@ -102,7 +126,11 @@ playme/
 │   │   ├── Hub.tsx            # grille des cartes de jeux
 │   │   └── GamePage.tsx       # charge le jeu (ou sa démo) depuis le registre
 │   ├── lib/
-│   │   └── leaderboard.ts     # classement localStorage, partagé par tous les jeux
+│   │   ├── leaderboard.ts     # classement localStorage, partagé par tous les jeux
+│   │   ├── multijoueur.ts     # délai 5 s, verrouillage, points, classement (testé)
+│   │   ├── defi.ts            # code ?defi=, graines reproductibles (testé)
+│   │   ├── partage.ts         # message, liens réseaux, image du score
+│   │   └── Partage.tsx        # bouton Partager + panneau de repli
 │   └── games/
 │       ├── index.ts           # registre des jeux (GameEntry)
 │       ├── _modele/           # jeu modèle à copier (non inscrit au registre)
@@ -112,9 +140,12 @@ playme/
 │           ├── engine.ts      # animation des vagues (motion)
 │           ├── Board.tsx, Car.tsx, ui.tsx
 │           ├── sound.ts       # sons Web Audio + vibration
-│           ├── Game.tsx       # partie
+│           ├── partie.ts      # manche seedée (défi)
+│           ├── Game.tsx       # partie solo (+ défi)
+│           ├── Multi.tsx      # multijoueur local
 │           └── Demo.tsx       # mode démo / grand écran
 ├── shots/                     # captures PNG (les MP4 de contrôle ne sont pas versionnés)
+├── shots-multi.mjs           # captures multi/partage/défi (node shots-multi.mjs [video])
 ├── shots.mjs                  # régénère les captures (Playwright, preview lancée)
 └── videos.mjs                 # vidéos de contrôle : node videos.mjs <1-6|demo|bestof>
 ```
