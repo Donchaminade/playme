@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { motion, AnimatePresence } from 'motion/react'
+import { motion, AnimatePresence, animate } from 'motion/react'
 import { Link } from 'react-router-dom'
 import { Car } from './Car'
-import { CELLS, COLS, ROWS, NIVEAUX, cellXY, generateShuffle, applyWaveToAll, scoreFor, type Wave } from './logic'
+import { CELLS, COLS, ROWS, NIVEAUX, CELL_RATIO, cellXY, generateShuffle, applyWaveToAll, applyWave, scoreFor, swapPoint, tilt, waveDuration, pauseAfter, type Wave } from './logic'
+
+const xf = (x: number, y: number, r = 0) => `translate(${x * 100}%, ${(y / CELL_RATIO) * 100}%) rotate(${r}deg)`
+const cellXf = (c: number) => { const { col, row } = cellXY(c); return xf(col, row * CELL_RATIO) }
 import { loadScores, saveScore, clearScores, type ScoreEntry } from '../../lib/leaderboard'
 
 const SLUG = 'suis-l-ambulance'
@@ -15,7 +18,7 @@ export default function Game() {
   const [lvIdx, setLvIdx] = useState(0)
   const [ambCar, setAmbCar] = useState(0)
   const [pos, setPos] = useState<number[]>(() => Array.from({ length: CELLS }, (_, i) => i))
-  const [prev, setPrev] = useState<number[]>(pos)
+  const carEls = useRef<(HTMLDivElement | null)[]>([])
   const [vague, setVague] = useState(0)
   const [waves, setWaves] = useState<Wave[]>([])
   const [score, setScore] = useState(0)
@@ -33,7 +36,7 @@ export default function Game() {
   const lancerNiveau = (idx: number) => {
     const base = Array.from({ length: CELLS }, (_, i) => i)
     const amb = Math.floor(Math.random() * CELLS)
-    setLvIdx(idx); setAmbCar(amb); setPos(base); setPrev(base); setVague(0); setChoisi(null)
+    setLvIdx(idx); setAmbCar(amb); setPos(base); setVague(0); setChoisi(null)
     setWaves(generateShuffle(NIVEAUX[idx], amb)); setPhase('montre')
   }
   const demarrer = () => { localStorage.setItem('jeux-reflexion:nom', nom.trim()); setScore(0); setDebut(Date.now()); setNow(Date.now()); lancerNiveau(0) }
@@ -44,7 +47,21 @@ export default function Game() {
     else if (phase === 'sirene') t = window.setTimeout(() => setPhase('melange'), 700)
     else if (phase === 'melange') {
       if (vague >= waves.length) t = window.setTimeout(() => { choixDebut.current = Date.now(); setPhase('choix') }, 350)
-      else t = window.setTimeout(() => { setPrev(pos); setPos(p => applyWaveToAll(p, waves[vague])); setVague(v => v + 1) }, vague === 0 ? 200 : level.dureeMs + 60)
+      else {
+        // Une vague : les 12 voitures roulent en même temps, transformées directement (pas de relayout React).
+        const w = waves[vague], d = waveDuration(level, vague)
+        let ctl: ReturnType<typeof animate> | undefined
+        t = window.setTimeout(() => {
+          ctl = animate(0, 1, { duration: d / 1000, ease: 'linear', onUpdate: (k) => {
+            pos.forEach((cell, car) => {
+              const el = carEls.current[car]; const sw = w.find(x => x.a === cell || x.b === cell); if (!el || !sw) return
+              const p = swapPoint(cell, applyWave(cell, w), sw.dir, k)
+              el.style.transform = xf(p.x, p.y, tilt(cell, applyWave(cell, w), sw.dir, k))
+            })
+          }, onComplete: () => { setPos(p => applyWaveToAll(p, w)); setVague(v => v + 1) } })
+        }, vague === 0 ? 250 : pauseAfter(level, vague - 1))
+        return () => { clearTimeout(t); ctl?.stop() }
+      }
     } else if (phase === 'bravo') t = window.setTimeout(() => lancerNiveau(lvIdx + 1), 1300)
     return () => clearTimeout(t)
   }, [phase, vague]) // eslint-disable-line
@@ -94,26 +111,16 @@ export default function Game() {
             style={{ top: `calc(${pct(ambCell).top} + ${50 / ROWS}% - 8px)` }} animate={{ x: [0, 5, 0] }} transition={{ repeat: Infinity, duration: 0.6 }} />
         )}
         {pos.map((cell, car) => {
-          const from = pct(prev[car]), to = pct(cell)
-          const moving = phase === 'melange' && prev[car] !== cell
-          const a = cellXY(prev[car]), b = cellXY(cell)
-          const dx = (b.col - a.col) * (100 / COLS), dy = (b.row - a.row) * (100 / ROWS) * 1.12
-          let heading = (Math.atan2(dy, dx) * 180) / Math.PI + 90
-          if (heading > 90) heading -= 180; if (heading < -90) heading += 180
-          const midL = `calc((${from.left} + ${to.left}) / 2 + ${(-dy * 0.18).toFixed(2)}%)`
-          const midT = `calc((${from.top} + ${to.top}) / 2 + ${(dx * 0.18).toFixed(2)}%)`
           const isAmb = car === ambCar
           const numero = phase === 'choix' || phase === 'perdu' ? cell + 1 : undefined
           return (
-            <motion.button key={car} type="button" aria-label={numero ? `Voiture ${numero}` : 'Voiture'}
+            <div key={car} ref={el => { carEls.current[car] = el }} className="absolute left-0 top-0 will-change-transform"
+              style={{ width: `${100 / COLS}%`, height: `${100 / ROWS}%`, transform: cellXf(cell), zIndex: isAmb ? 2 : 1 }}>
+            <motion.button type="button" aria-label={numero ? `Voiture ${numero}` : 'Voiture'}
               onClick={() => choisir(car)} disabled={phase !== 'choix' || choisi !== null}
-              className="absolute flex items-center justify-center p-[3%] outline-none"
-              style={{ width: `${100 / COLS}%`, height: `${100 / ROWS}%`, zIndex: moving ? 5 : 1 }}
-              initial={false}
-              animate={moving ? { left: [from.left, midL, to.left], top: [from.top, midT, to.top], rotate: [0, heading, 0] } : { left: to.left, top: to.top, rotate: 0 }}
-              transition={moving ? { duration: level.dureeMs / 1000, ease: 'easeInOut', times: [0, 0.5, 1] } : { duration: 0 }}
+              className="flex h-full w-full items-center justify-center outline-none"
               whileTap={phase === 'choix' ? { scale: 0.9 } : undefined}>
-              <div className="relative h-[78%]">
+              <div className="relative h-[66%]">
                 {isAmb && phase === 'montre' && (
                   <motion.div className="absolute -inset-5 rounded-full blur-xl" animate={{ backgroundColor: ['rgba(240,67,90,.75)', 'rgba(47,107,255,.6)', 'rgba(240,67,90,.75)'], scale: [1, 1.25, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} />
                 )}
@@ -128,6 +135,7 @@ export default function Game() {
                 )}
               </div>
             </motion.button>
+            </div>
           )
         })}
 
