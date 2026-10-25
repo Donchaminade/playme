@@ -23,7 +23,11 @@ export default function Hub() {
               <p className="mt-1 text-white/70">{g.accroche}</p>
               <p className="mt-3 text-xs text-white/40">⏱ {g.duree}</p>
             </motion.div>)
-          return g.statut === 'actif' ? <Link key={g.slug} to={`/jeux/${g.slug}`}>{card}</Link> : <div key={g.slug}>{card}</div>
+          return g.statut === 'actif' ? (
+            <div key={g.slug} className="relative">
+              <Link to={`/jeux/${g.slug}`} className="block h-full">{card}</Link>
+              {g.demo && <Link to={`/jeux/${g.slug}/demo`} className="absolute bottom-5 right-5 z-10 rounded-full border border-white/20 bg-nuit/60 px-3 py-1 text-xs font-semibold text-white/80 hover:border-orange hover:text-orange">📺 Mode démo / grand écran</Link>}
+            </div>) : <div key={g.slug}>{card}</div>
         })}
       </div>
     </main>

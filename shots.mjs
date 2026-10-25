@@ -19,5 +19,10 @@ for (const [tag, vp] of [['mobile', { width: 390, height: 844 }], ['desktop', { 
   }
   await p.waitForSelector('text=VICTOIRE', { timeout: 10000 }); await p.waitForTimeout(1300)
   await p.screenshot({ path: `shots/${tag}-victoire.png` })
+  if (tag === 'desktop') {
+    await p.goto(B + '/jeux/suis-l-ambulance/demo'); await p.waitForTimeout(800); await p.click('text=LANCER')
+    await p.waitForSelector('text=OÙ EST', { timeout: 60000 }); await p.waitForTimeout(1200)
+    await p.screenshot({ path: `shots/desktop-demo.png` })
+  }
 }
 await b.close()

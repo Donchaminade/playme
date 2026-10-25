@@ -1,31 +1,38 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { motion, AnimatePresence, animate } from 'motion/react'
-import { Link } from 'react-router-dom'
-import { Car } from './Car'
-import { CELLS, COLS, ROWS, NIVEAUX, CELL_RATIO, cellXY, generateShuffle, applyWaveToAll, applyWave, scoreFor, swapPoint, tilt, waveDuration, pauseAfter, type Wave } from './logic'
-
-const xf = (x: number, y: number, r = 0) => `translate(${x * 100}%, ${(y / CELL_RATIO) * 100}%) rotate(${r}deg)`
-const cellXf = (c: number) => { const { col, row } = cellXY(c); return xf(col, row * CELL_RATIO) }
+import { Link, useSearchParams } from 'react-router-dom'
+import { Board } from './Board'
+import { Classement, Confettis } from './ui'
+import { CELLS, NIVEAUX, buildPlan, scoreFor, isExpertUnlocked, onLevelWon, MOTIFS, type WavePlan } from './logic'
+import { runPlan, newCtl, type RunCtl } from './engine'
+import * as snd from './sound'
 import { loadScores, saveScore, clearScores, type ScoreEntry } from '../../lib/leaderboard'
 
 const SLUG = 'suis-l-ambulance'
 type Phase = 'accueil' | 'montre' | 'sirene' | 'melange' | 'choix' | 'bravo' | 'perdu' | 'victoire'
-const pct = (c: number) => { const { col, row } = cellXY(c); return { left: `${(col * 100) / COLS}%`, top: `${(row * 100) / ROWS}%` } }
+const ident = () => Array.from({ length: CELLS }, (_, i) => i)
 
 export default function Game() {
+  const [params] = useSearchParams()
   const [nom, setNom] = useState(() => localStorage.getItem('jeux-reflexion:nom') || '')
   const [phase, setPhase] = useState<Phase>('accueil')
   const [lvIdx, setLvIdx] = useState(0)
+  const [lastIdx, setLastIdx] = useState(4)
   const [ambCar, setAmbCar] = useState(0)
-  const [pos, setPos] = useState<number[]>(() => Array.from({ length: CELLS }, (_, i) => i))
-  const carEls = useRef<(HTMLDivElement | null)[]>([])
+  const [pos, setPos] = useState<number[]>(ident)
+  const [plan, setPlan] = useState<WavePlan[]>([])
   const [vague, setVague] = useState(0)
-  const [waves, setWaves] = useState<Wave[]>([])
+  const [tag, setTag] = useState('')
   const [score, setScore] = useState(0)
   const [debut, setDebut] = useState(0)
   const [now, setNow] = useState(Date.now())
   const [choisi, setChoisi] = useState<number | null>(null)
   const [classement, setClassement] = useState<ScoreEntry[]>(() => loadScores(SLUG))
+  const [son, setSon] = useState(snd.soundOn)
+  const [expert, setExpert] = useState(() => isExpertUnlocked(localStorage))
+  const carEls = useRef<(HTMLDivElement | null)[]>([])
+  const boardRef = useRef<HTMLDivElement>(null)
+  const ctlRef = useRef<RunCtl>(newCtl())
   const choixDebut = useRef(0)
   const level = NIVEAUX[lvIdx]
   const enJeu = !['accueil', 'perdu', 'victoire'].includes(phase)
@@ -34,62 +41,67 @@ export default function Game() {
   useEffect(() => { if (!enJeu) return; const t = setInterval(() => setNow(Date.now()), 100); return () => clearInterval(t) }, [enJeu])
 
   const lancerNiveau = (idx: number) => {
-    const base = Array.from({ length: CELLS }, (_, i) => i)
     const amb = Math.floor(Math.random() * CELLS)
-    setLvIdx(idx); setAmbCar(amb); setPos(base); setVague(0); setChoisi(null)
-    setWaves(generateShuffle(NIVEAUX[idx], amb)); setPhase('montre')
+    setLvIdx(idx); setAmbCar(amb); setPos(ident()); setVague(0); setTag(''); setChoisi(null)
+    setPlan(buildPlan(NIVEAUX[idx], Math.random, amb)); setPhase('montre')
   }
-  const demarrer = () => { localStorage.setItem('jeux-reflexion:nom', nom.trim()); setScore(0); setDebut(Date.now()); setNow(Date.now()); lancerNiveau(0) }
+  const demarrer = (startIdx: number) => {
+    localStorage.setItem('jeux-reflexion:nom', nom.trim()); snd.tick()
+    setLastIdx(startIdx === 5 ? 5 : 4); setScore(0); setDebut(Date.now()); setNow(Date.now()); lancerNiveau(startIdx)
+  }
+  // Lien direct animateur : ?niveau=N (le N6 seulement s'il est débloqué)
+  useEffect(() => {
+    const n = Number(params.get('niveau')); if (!n) return
+    const idx = Math.min(n, isExpertUnlocked(localStorage) ? 6 : 5) - 1; if (idx >= 0) demarrer(idx)
+  }, []) // eslint-disable-line
 
   useEffect(() => {
     let t: number | undefined
     if (phase === 'montre') t = window.setTimeout(() => setPhase('sirene'), 2400)
     else if (phase === 'sirene') t = window.setTimeout(() => setPhase('melange'), 700)
     else if (phase === 'melange') {
-      if (vague >= waves.length) t = window.setTimeout(() => { choixDebut.current = Date.now(); setPhase('choix') }, 350)
-      else {
-        // Une vague : les 12 voitures roulent en même temps, transformées directement (pas de relayout React).
-        const w = waves[vague], d = waveDuration(level, vague)
-        let ctl: ReturnType<typeof animate> | undefined
-        t = window.setTimeout(() => {
-          ctl = animate(0, 1, { duration: d / 1000, ease: 'linear', onUpdate: (k) => {
-            pos.forEach((cell, car) => {
-              const el = carEls.current[car]; const sw = w.find(x => x.a === cell || x.b === cell); if (!el || !sw) return
-              const p = swapPoint(cell, applyWave(cell, w), sw.dir, k)
-              el.style.transform = xf(p.x, p.y, tilt(cell, applyWave(cell, w), sw.dir, k))
-            })
-          }, onComplete: () => { setPos(p => applyWaveToAll(p, w)); setVague(v => v + 1) } })
-        }, vague === 0 ? 250 : pauseAfter(level, vague - 1))
-        return () => { clearTimeout(t); ctl?.stop() }
-      }
+      const ctl = newCtl(); ctlRef.current = ctl
+      t = window.setTimeout(async () => {
+        const fin = await runPlan(plan, pos, carEls.current, ctl, (i, w) => { setVague(i + 1); setTag(w.tag); if (w.tag === 'rafale' || w.tag === 'final') snd.whoosh(w.dur) })
+        if (ctl.cancelled) return
+        setPos(fin); snd.ding(); snd.vibrate(40)
+        if (boardRef.current) animate(boardRef.current, { scale: [1, 1.03, 0.995, 1] }, { duration: 0.35 })
+        window.setTimeout(() => { choixDebut.current = Date.now(); setPhase('choix') }, 300)
+      }, 250)
+      return () => { clearTimeout(t); ctl.cancelled = true; ctl.anim?.stop() }
     } else if (phase === 'bravo') t = window.setTimeout(() => lancerNiveau(lvIdx + 1), 1300)
     return () => clearTimeout(t)
-  }, [phase, vague]) // eslint-disable-line
+  }, [phase]) // eslint-disable-line
 
   const finir = (gagne: boolean, total: number) => {
-    const entry = { nom: nom.trim() || 'Anonyme', score: total, niveau: gagne ? NIVEAUX.length : lvIdx + 1, temps: Math.round((Date.now() - debut) / 1000), date: Date.now() }
-    setClassement(saveScore(SLUG, entry)); setPhase(gagne ? 'victoire' : 'perdu')
+    const entry = { nom: nom.trim() || 'Anonyme', score: total, niveau: gagne ? level.niveau : lvIdx + 1, temps: Math.round((Date.now() - debut) / 1000), date: Date.now() }
+    setClassement(saveScore(SLUG, entry)); setPhase(gagne ? 'victoire' : 'perdu'); if (gagne) snd.win(); else snd.lose()
   }
   const choisir = (car: number) => {
-    if (phase !== 'choix') return
+    if (phase !== 'choix' || choisi !== null) return
     setChoisi(car)
     if (car === ambCar) {
-      const total = score + scoreFor(level, Date.now() - choixDebut.current); setScore(total)
-      if (lvIdx === NIVEAUX.length - 1) setTimeout(() => finir(true, total), 900); else setPhase('bravo')
+      const total = score + scoreFor(level, Date.now() - choixDebut.current); setScore(total); snd.ding()
+      onLevelWon(level.niveau, localStorage); setExpert(isExpertUnlocked(localStorage))
+      if (lvIdx >= lastIdx) setTimeout(() => finir(true, total), 900); else setPhase('bravo')
     } else setTimeout(() => finir(false, score), 1400)
   }
 
   const montreAmb = phase === 'montre' || phase === 'bravo' || (phase === 'choix' && choisi !== null) || phase === 'perdu' || phase === 'victoire'
-  const progression = phase === 'melange' ? vague / Math.max(1, waves.length) : phase === 'choix' || phase === 'bravo' ? 1 : 0
+  const progression = phase === 'melange' ? vague / Math.max(1, plan.length) : phase === 'choix' || phase === 'bravo' ? 1 : 0
   const titre = phase === 'choix' || phase === 'perdu' ? ['OÙ EST ', "L'AMBULANCE ?"] : ['SUIS ', "L'AMBULANCE"]
-  const ambCell = pos[ambCar]
+  const motifCourant = phase === 'melange' && vague > 0 ? plan[vague - 1]?.move.motif : undefined
 
   return (
     <div className="mx-auto flex min-h-dvh w-full max-w-[560px] flex-col items-center px-4 pb-8 pt-4">
-      <header className="flex w-full items-center justify-between text-sm text-white/70">
-        <Link to="/" className="rounded-full border border-white/15 px-3 py-1 hover:bg-white/10">← Jeux</Link>
+      <header className="flex w-full items-center justify-between gap-2 text-sm text-white/70">
+        <div className="flex gap-2">
+          <Link to="/" className="rounded-full border border-white/15 px-3 py-1 hover:bg-white/10">← Jeux</Link>
+          <button onClick={() => { snd.setSound(!son); setSon(!son) }} aria-label={son ? 'Couper le son' : 'Activer le son'} className="rounded-full border border-white/15 px-3 py-1 hover:bg-white/10">{son ? '🔊' : '🔇'}</button>
+          <Link to={`/jeux/${SLUG}/demo`} className="hidden rounded-full border border-white/15 px-3 py-1 hover:bg-white/10 sm:inline">📺 Démo</Link>
+        </div>
         <div className="flex gap-3 font-semibold tabular-nums">
-          <span>Niv. {enJeu ? level.niveau : '–'}/{NIVEAUX.length}</span>
+          <span>{enJeu ? (level.niveau === 6 ? 'Expert' : `Niv. ${level.niveau}/5`) : 'Niv. –'}</span>
           <span>⏱ {(ecoule / 1000).toFixed(1)} s</span>
           <span className="text-taxi">★ {score}</span>
         </div>
@@ -99,71 +111,39 @@ export default function Game() {
         {titre[0]}<span className="text-sirene">{titre[1]}</span>
       </h1>
       <div className="mt-2 h-1 w-40 overflow-hidden rounded-full bg-white/10">
-        <motion.div className="h-full bg-orange" animate={{ width: `${progression * 100}%` }} transition={{ duration: 0.3 }} />
+        <motion.div className={`h-full ${tag === 'rafale' || tag === 'final' ? 'bg-sirene' : 'bg-orange'}`} animate={{ width: `${progression * 100}%` }} transition={{ duration: 0.3 }} />
       </div>
 
-      <div className="relative mt-5 w-full" style={{ aspectRatio: `${COLS} / ${ROWS * 1.12}`, maxWidth: `calc((100dvh - 230px) * ${COLS / (ROWS * 1.12)})` }}>
-        <div className="absolute inset-0 grid border border-trait/80 bg-grille shadow-[0_0_60px_rgba(80,90,180,.18)]" style={{ gridTemplateColumns: `repeat(${COLS},1fr)`, gridTemplateRows: `repeat(${ROWS},1fr)` }}>
-          {Array.from({ length: CELLS }, (_, i) => <div key={i} className="border border-trait/40" />)}
-        </div>
-        {phase === 'montre' && (
-          <motion.div className="absolute -left-4 z-10 h-0 w-0 border-y-[8px] border-l-[12px] border-y-transparent border-l-sirene"
-            style={{ top: `calc(${pct(ambCell).top} + ${50 / ROWS}% - 8px)` }} animate={{ x: [0, 5, 0] }} transition={{ repeat: Infinity, duration: 0.6 }} />
-        )}
-        {pos.map((cell, car) => {
-          const isAmb = car === ambCar
-          const numero = phase === 'choix' || phase === 'perdu' ? cell + 1 : undefined
-          return (
-            <div key={car} ref={el => { carEls.current[car] = el }} className="absolute left-0 top-0 will-change-transform"
-              style={{ width: `${100 / COLS}%`, height: `${100 / ROWS}%`, transform: cellXf(cell), zIndex: isAmb ? 2 : 1 }}>
-            <motion.button type="button" aria-label={numero ? `Voiture ${numero}` : 'Voiture'}
-              onClick={() => choisir(car)} disabled={phase !== 'choix' || choisi !== null}
-              className="flex h-full w-full items-center justify-center outline-none"
-              whileTap={phase === 'choix' ? { scale: 0.9 } : undefined}>
-              <div className="relative h-[66%]">
-                {isAmb && phase === 'montre' && (
-                  <motion.div className="absolute -inset-5 rounded-full blur-xl" animate={{ backgroundColor: ['rgba(240,67,90,.75)', 'rgba(47,107,255,.6)', 'rgba(240,67,90,.75)'], scale: [1, 1.25, 1] }} transition={{ repeat: Infinity, duration: 0.8 }} />
-                )}
-                <AnimatePresence mode="popLayout" initial={false}>
-                  <motion.div key={isAmb && montreAmb ? 'amb' : 'taxi'} className="relative h-full"
-                    initial={{ opacity: 0, scale: 0.8, rotateY: 90 }} animate={{ opacity: 1, scale: 1, rotateY: 0 }} exit={{ opacity: 0, scale: 0.8 }} transition={{ duration: 0.35 }}>
-                    <Car ambulance={isAmb && montreAmb} numero={numero} />
-                  </motion.div>
-                </AnimatePresence>
-                {choisi === car && (
-                  <motion.div className={`absolute -inset-2 rounded-xl border-4 ${car === ambCar ? 'border-emerald-400' : 'border-sirene'}`} initial={{ scale: 1.4, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} />
-                )}
-              </div>
-            </motion.button>
-            </div>
-          )
-        })}
-
+      <div className="relative mt-5 w-full">
+        <Board ref={boardRef} pos={pos} ambCar={ambCar} carEls={carEls} showAmb={montreAmb} glow={phase === 'montre'}
+          numbers={phase === 'choix' || phase === 'perdu'} picked={choisi} onPick={phase === 'choix' && choisi === null ? choisir : undefined} />
         <AnimatePresence>
           {phase === 'bravo' && (
-            <motion.div className="absolute inset-0 z-20 flex items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-              <motion.div className="rounded-2xl bg-emerald-400 px-6 py-3 font-titre text-3xl text-nuit" initial={{ scale: 0.4, rotate: -8 }} animate={{ scale: 1, rotate: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 14 }}>BIEN VU ! NIVEAU {level.niveau + 1}</motion.div>
+            <motion.div className="absolute inset-0 z-50 flex items-center justify-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <motion.div className="rounded-2xl bg-emerald-400 px-6 py-3 font-titre text-3xl text-nuit" initial={{ scale: 0.4, rotate: -8 }} animate={{ scale: 1, rotate: -3 }} transition={{ type: 'spring', stiffness: 300, damping: 14 }}>
+                BIEN VU ! NIVEAU {level.niveau + 1}
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
       </div>
 
       <div className="mt-4 min-h-12 text-center text-white/75">
-        {phase === 'montre' && <p>Repère l'ambulance… la sirène va s'éteindre !</p>}
+        {phase === 'montre' && <p>Repère l'ambulance… la sirène va s'éteindre ! <span className="text-white/40">({level.nom})</span></p>}
         {phase === 'sirene' && <p className="font-semibold text-sirene">Sirène coupée 🔇</p>}
-        {phase === 'melange' && <p>Ne la quitte pas des yeux…</p>}
+        {phase === 'melange' && <p>{tag === 'rafale' ? <b className="text-sirene">Rafale !</b> : tag === 'feinte' ? 'Hmm…' : tag === 'final' ? <b className="text-sirene">Dernier virage !</b> : 'Ne la quitte pas des yeux…'}{motifCourant && <span className="ml-2 text-white/35">· {MOTIFS[motifCourant].nom}</span>}</p>}
         {phase === 'choix' && choisi === null && <span className="inline-block rounded-full bg-orange px-5 py-2 text-sm font-extrabold uppercase tracking-wide text-nuit">Touche le bon numéro ↓</span>}
-        {phase === 'choix' && choisi !== null && choisi !== ambCar && <p className="font-semibold text-sirene">Raté ! C'était le n° {ambCell + 1}.</p>}
+        {phase === 'choix' && choisi !== null && choisi !== ambCar && <p className="font-semibold text-sirene">Raté ! C'était le n° {pos[ambCar] + 1}.</p>}
       </div>
 
       <AnimatePresence>
         {(phase === 'accueil' || phase === 'perdu' || phase === 'victoire') && (
-          <motion.div className="fixed inset-0 z-30 flex items-end justify-center bg-nuit/80 p-4 backdrop-blur-sm sm:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
-            <motion.div className="relative w-full max-w-md overflow-hidden rounded-3xl border border-white/10 bg-[#0d1124] p-6" initial={{ y: 60, scale: 0.95 }} animate={{ y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }}>
+          <motion.div className="fixed inset-0 z-[60] flex items-end justify-center bg-nuit/80 p-4 backdrop-blur-sm sm:items-center" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div className="relative max-h-[94dvh] w-full max-w-md overflow-auto rounded-3xl border border-white/10 bg-[#0d1124] p-6" initial={{ y: 60, scale: 0.95 }} animate={{ y: 0, scale: 1 }} transition={{ type: 'spring', stiffness: 260, damping: 22 }}>
               {phase === 'victoire' && <Confettis />}
               {phase === 'accueil' && (<>
                 <h2 className="font-titre text-4xl">SUIS <span className="text-sirene">L'AMBULANCE</span></h2>
-                <p className="mt-2 text-white/70">Repère l'ambulance, sa sirène s'éteint, puis les taxis se mélangent. Retrouve-la ! {NIVEAUX.length} niveaux, de plus en plus rapides.</p>
+                <p className="mt-2 text-white/70">Repère l'ambulance, sa sirène s'éteint, puis les 12 taxis se mélangent : cercles, carrousels, diagonales, tapis roulants… Retrouve-la ! 5 niveaux, puis le niveau Expert.</p>
               </>)}
               {phase === 'perdu' && (<>
                 <h2 className="font-titre text-4xl text-sirene">PERDU !</h2>
@@ -171,15 +151,18 @@ export default function Game() {
               </>)}
               {phase === 'victoire' && (<>
                 <motion.h2 className="font-titre text-5xl text-taxi" initial={{ scale: 0.3, rotate: -10 }} animate={{ scale: 1, rotate: 0 }} transition={{ type: 'spring', stiffness: 200, damping: 10 }}>VICTOIRE ! 🚑</motion.h2>
-                <p className="mt-2 text-white/80">Œil de lynx ! Les {NIVEAUX.length} niveaux réussis : <b className="text-taxi">{score} pts</b> en {Math.round((Date.now() - debut) / 1000)} s.</p>
+                <p className="mt-2 text-white/80">{level.niveau === 6 ? 'Niveau Expert réussi !' : 'Les 5 niveaux réussis !'} <b className="text-taxi">{score} pts</b> en {Math.round((Date.now() - debut) / 1000)} s.</p>
+                {level.niveau === 5 && <p className="mt-2 rounded-xl bg-sirene/15 px-3 py-2 text-sm font-semibold text-sirene">🔓 Niveau Expert débloqué !</p>}
               </>)}
               <label className="mt-5 block text-sm text-white/60">Nom du joueur (mode événement)
                 <input value={nom} onChange={e => setNom(e.target.value)} maxLength={24} placeholder="Ex. Ama du GDG Lomé"
                   className="mt-1 w-full rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-base text-white outline-none focus:border-orange" />
               </label>
-              <button onClick={demarrer} className="mt-4 w-full rounded-xl bg-orange py-3 font-extrabold uppercase tracking-wide text-nuit active:scale-[.98]">
+              <button onClick={() => demarrer(0)} className="mt-4 w-full rounded-xl bg-orange py-3 font-extrabold uppercase tracking-wide text-nuit active:scale-[.98]">
                 {phase === 'accueil' ? 'Jouer' : 'Rejouer'}
               </button>
+              {expert && <button onClick={() => demarrer(5)} className="mt-2 w-full rounded-xl border border-sirene py-3 font-extrabold uppercase tracking-wide text-sirene active:scale-[.98]">Niveau Expert</button>}
+              <Link to={`/jeux/${SLUG}/demo`} className="mt-2 block text-center text-sm text-white/50 underline">📺 Mode démo / grand écran</Link>
               <Classement list={classement} onReset={() => { clearScores(SLUG); setClassement([]) }} />
             </motion.div>
           </motion.div>
@@ -187,28 +170,4 @@ export default function Game() {
       </AnimatePresence>
     </div>
   )
-}
-
-function Classement({ list, onReset }: { list: ScoreEntry[]; onReset: () => void }) {
-  if (!list.length) return <p className="mt-4 text-center text-sm text-white/40">Aucun score pour l'instant.</p>
-  return (
-    <div className="mt-5">
-      <div className="flex items-center justify-between"><h3 className="font-titre text-xl tracking-wide">CLASSEMENT</h3>
-        <button onClick={() => confirm('Effacer le classement ?') && onReset()} className="text-xs text-white/40 underline">Réinitialiser</button></div>
-      <ol className="mt-2 max-h-44 space-y-1 overflow-auto text-sm">
-        {list.slice(0, 10).map((e, i) => (
-          <li key={e.date + e.nom} className="flex justify-between rounded-lg bg-white/5 px-3 py-1.5">
-            <span>{['🥇', '🥈', '🥉'][i] ?? `${i + 1}.`} {e.nom}</span>
-            <span className="tabular-nums text-white/70">niv. {e.niveau} · {e.temps}s · <b className="text-taxi">{e.score}</b></span>
-          </li>))}
-      </ol>
-    </div>
-  )
-}
-
-function Confettis() {
-  const bits = useMemo(() => Array.from({ length: 36 }, (_, i) => ({ i, x: Math.random() * 100, d: Math.random() * 0.6, c: ['#F5B800', '#F0435A', '#2F6BFF', '#F5A343', '#fff'][i % 5], r: Math.random() * 360 })), [])
-  return <div className="pointer-events-none absolute inset-0">{bits.map(b => (
-    <motion.span key={b.i} className="absolute top-0 h-3 w-1.5 rounded-sm" style={{ left: `${b.x}%`, backgroundColor: b.c }}
-      initial={{ y: -20, rotate: b.r, opacity: 1 }} animate={{ y: 420, rotate: b.r + 540, opacity: 0 }} transition={{ duration: 2.2, delay: b.d, repeat: Infinity, repeatDelay: 0.6 }} />))}</div>
 }
