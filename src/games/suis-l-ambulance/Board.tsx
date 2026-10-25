@@ -1,5 +1,5 @@
 import { motion, AnimatePresence } from 'motion/react'
-import { forwardRef, type MutableRefObject } from 'react'
+import { forwardRef, type MutableRefObject, type ReactNode } from 'react'
 import { Car } from './Car'
 import { CELLS, COLS, ROWS, CELL_RATIO } from './logic'
 import { cellXf } from './engine'
@@ -8,9 +8,11 @@ export interface BoardProps {
   pos: number[]; ambCar: number; showAmb: boolean; glow: boolean; numbers: boolean
   picked?: number | null; reveal?: boolean; big?: boolean; onPick?: (car: number) => void
   carEls: MutableRefObject<(HTMLDivElement | null)[]>; maxHeight?: string
+  /** contenu superposé à une voiture (ex. pastilles des joueurs à la révélation) */
+  overlay?: (car: number, cell: number) => ReactNode
 }
 /** Grille + voitures. Les voitures sont positionnées par transform ; le moteur les anime sans re-render. */
-export const Board = forwardRef<HTMLDivElement, BoardProps>(function Board({ pos, ambCar, showAmb, glow, numbers, picked, reveal, big, onPick, carEls, maxHeight = '100dvh - 230px' }, ref) {
+export const Board = forwardRef<HTMLDivElement, BoardProps>(function Board({ pos, ambCar, showAmb, glow, numbers, picked, reveal, big, onPick, carEls, maxHeight = '100dvh - 230px', overlay }, ref) {
   return (
     <div ref={ref} className="relative mx-auto w-full" style={{ aspectRatio: `${COLS} / ${ROWS * CELL_RATIO}`, maxWidth: `calc((${maxHeight}) * ${COLS / (ROWS * CELL_RATIO)})` }}>
       <div className="absolute inset-0 grid border border-trait/80 bg-grille shadow-[0_0_60px_rgba(80,90,180,.18)]" style={{ gridTemplateColumns: `repeat(${COLS},1fr)`, gridTemplateRows: `repeat(${ROWS},1fr)` }}>
@@ -50,6 +52,7 @@ export const Board = forwardRef<HTMLDivElement, BoardProps>(function Board({ pos
                 )}
               </div>
             </motion.button>
+            {overlay?.(car, cell)}
           </div>
         )
       })}
