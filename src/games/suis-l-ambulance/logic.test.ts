@@ -40,6 +40,15 @@ describe('bibliothèque de mouvements', () => {
 })
 
 describe('tempo', () => {
+  it('table de tempo : N1 ≈ 650-700 ms, +8-10 %/niveau, planchers lisibles', () => {
+    expect(NIVEAUX[0].baseMs).toBeGreaterThanOrEqual(650); expect(NIVEAUX[0].baseMs).toBeLessThanOrEqual(700)
+    for (let i = 1; i < NIVEAUX.length; i++) { const r = NIVEAUX[i - 1].baseMs / NIVEAUX[i].baseMs; expect(r).toBeGreaterThanOrEqual(1.08); expect(r).toBeLessThanOrEqual(1.105) }
+    NIVEAUX.forEach(lv => { expect(lv.accel).toBeGreaterThanOrEqual(1.6); expect(lv.accel).toBeLessThanOrEqual(1.8); expect(lv.motifs.length).toBeGreaterThanOrEqual(4); expect(lv.rafales).toBeGreaterThanOrEqual(1) })
+    for (let i = 1; i < NIVEAUX.length; i++) { expect(NIVEAUX[i].rafales).toBeGreaterThanOrEqual(NIVEAUX[i - 1].rafales); expect(NIVEAUX[i].feintes).toBeGreaterThanOrEqual(NIVEAUX[i - 1].feintes) }
+    for (let s = 0; s < 30; s++) NIVEAUX.forEach(lv => buildPlan(lv, mulberry32(s), 0).forEach(w => {
+      expect(w.dur).toBeGreaterThanOrEqual(w.tag === 'rafale' ? 260 : w.tag === 'final' ? 300 : 320)
+    }))
+  })
   it('feinte : monotone, continue, quasi-arrêt au milieu', () => {
     const f = easeFn('feinte'); let prev = 0
     for (let i = 1; i <= 200; i++) { const v = f(i / 200); expect(v).toBeGreaterThanOrEqual(prev - 1e-9); expect(v - prev).toBeLessThan(0.03); prev = v }
@@ -51,7 +60,6 @@ describe('tempo', () => {
       for (let i = 1; i < d.length; i++) expect(d[i]).toBeLessThanOrEqual(d[i - 1])
       expect(d[0] / d.at(-1)!).toBeCloseTo(lv.accel); expect(lv.accel).toBeLessThanOrEqual(1.8)
     }
-    for (let i = 1; i < NIVEAUX.length; i++) { const r = NIVEAUX[i - 1].baseMs / NIVEAUX[i].baseMs; expect(r).toBeGreaterThan(1); expect(r).toBeLessThan(1.15) }
   })
   it('rafales, feintes et final conformes et bornés', () => {
     for (let s = 0; s < 30; s++) for (const lv of NIVEAUX) {
@@ -79,8 +87,8 @@ describe('tempo', () => {
 
 describe('niveaux et séquences', () => {
   it('motifs autorisés par niveau, nouveautés présentes, jamais deux fois le même d\'affilée', () => {
-    const attendu: MotifId[][] = [['voisines', 'cercle'], ['voisines', 'cercle', 'carrousel', 'tapis'], ['voisines', 'cercle', 'carrousel', 'tapis', 'diagonales'],
-      ['voisines', 'cercle', 'carrousel', 'tapis', 'diagonales', 'serpent', 'miroir'], MOTIF_IDS, MOTIF_IDS]
+    const b1: MotifId[] = ['voisines', 'cercle', 'carrousel', 'tapis'], b2: MotifId[] = [...b1, 'diagonales'], b3: MotifId[] = [...b2, 'serpent', 'miroir']
+    const attendu: MotifId[][] = [b1, b2, b3, MOTIF_IDS, MOTIF_IDS, MOTIF_IDS]
     NIVEAUX.forEach((lv, i) => expect([...lv.motifs].sort()).toEqual([...attendu[i]].sort()))
     for (let s = 0; s < 40; s++) for (const lv of NIVEAUX) {
       const seq = motifSequence(lv, mulberry32(s + 100 * lv.niveau))

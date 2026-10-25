@@ -21,14 +21,16 @@ Plateforme de petits jeux de réflexion pour les événements tech (Lomé et ail
 | Miroir | symétrie haut-bas ou gauche-droite |
 | Échanges lointains | 2–3 échanges à distance par-dessus, le reste en paires voisines |
 
-| Niveau | Vagues | Motifs ajoutés | Rythme |
-|---|---|---|---|
-| 1 Échauffement | 6 | voisines, cercle (lent) | régulier |
-| 2 Manège | 8 | carrousels, tapis | régulier |
-| 3 Croisements | 9 | diagonales | 1 rafale |
-| 4 Embrouilles | 10 | serpent, miroir | 1 rafale, 1 feinte |
-| 5 Grand mix | 12 | échanges lointains | 2 rafales, 1 feinte, final rapide |
-| 6 Expert | 14 | tout | 3 rafales, 2 feintes, final (débloqué après le N5) |
+| Niveau | Vagues | Base / vague | Motifs | Rythme |
+|---|---|---|---|---|
+| 1 Échauffement | 7 | 680 ms | voisines, cercle, carrousels, tapis | 1 rafale |
+| 2 Croisements | 8 | 620 ms | + diagonales | 1 rafale, 1 feinte |
+| 3 Embrouilles | 9 | 565 ms | + serpent, miroir | 1 rafale, 1 feinte |
+| 4 Grand mix | 10 | 515 ms | + échanges lointains | 2 rafales, 1 feinte, final |
+| 5 Tempête | 12 | 470 ms | tout | 2 rafales, 2 feintes, final |
+| 6 Expert | 14 | 430 ms | tout | 3 rafales, 2 feintes, final (débloqué après le N5) |
+
+Dans une partie, les vagues accélèrent progressivement (×1,6 à ×1,8). Planchers : 320 ms pour une vague normale, 300 ms pour le final, 260 ms pour une rafale.
 
 Rafale = 2–3 vagues au moins 2× plus rapides puis respiration ; feinte = ralentit presque à l'arrêt puis repart ; final = 2–3 vagues vives puis arrêt net avec rebond. Chaque trajectoire est vérifiée par échantillonnage (pas de collision, pas de saut, l'ambulance n'est jamais recouverte) ; toutes les voitures s'orientent de la même façon, l'orientation ne trahit donc rien.
 

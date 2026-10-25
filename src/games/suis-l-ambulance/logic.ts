@@ -247,7 +247,8 @@ export function generateMove(id: MotifId, rng: Rng = Math.random, amb?: number):
 export type EaseId = 'std' | 'feinte'
 export type Tag = 'normal' | 'rafale' | 'feinte' | 'final'
 export interface WavePlan { move: Move; dur: number; pause: number; ease: EaseId; tag: Tag }
-export const MIN_DUR = 320, MAX_DUR = 1900
+/** plancher des rafales / plancher lisible des vagues normales / plancher du final */
+export const MIN_DUR = 260, LISIBLE = 320, FINAL_MIN = 300, MAX_DUR = 1400
 const cubic = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
 /** Feinte : avance, ralentit presque à l'arrêt vers 45 %, puis repart. Monotone et continue. */
 export function easeFn(id: EaseId) {
@@ -259,15 +260,15 @@ export interface Level {
   niveau: number; nom: string; vagues: number; baseMs: number; accel: number
   motifs: MotifId[]; nouveaux: MotifId[]; rafales: number; feintes: number; final: boolean
 }
-const N1: MotifId[] = ['voisines', 'cercle'], N2: MotifId[] = [...N1, 'carrousel', 'tapis'], N3: MotifId[] = [...N2, 'diagonales']
-const N4: MotifId[] = [...N3, 'serpent', 'miroir'], N5: MotifId[] = [...N4, 'lointains']
+const N1: MotifId[] = ['voisines', 'cercle', 'carrousel', 'tapis'], N2: MotifId[] = [...N1, 'diagonales']
+const N3: MotifId[] = [...N2, 'serpent', 'miroir'], N4: MotifId[] = [...N3, 'lointains']
 export const NIVEAUX: Level[] = [
-  { niveau: 1, nom: 'Échauffement', vagues: 6, baseMs: 1100, accel: 1.5, motifs: N1, nouveaux: N1, rafales: 0, feintes: 0, final: false },
-  { niveau: 2, nom: 'Manège', vagues: 8, baseMs: 1000, accel: 1.6, motifs: N2, nouveaux: ['carrousel', 'tapis'], rafales: 0, feintes: 0, final: false },
-  { niveau: 3, nom: 'Croisements', vagues: 9, baseMs: 920, accel: 1.7, motifs: N3, nouveaux: ['diagonales'], rafales: 1, feintes: 0, final: false },
-  { niveau: 4, nom: 'Embrouilles', vagues: 10, baseMs: 850, accel: 1.7, motifs: N4, nouveaux: ['serpent', 'miroir'], rafales: 1, feintes: 1, final: false },
-  { niveau: 5, nom: 'Grand mix', vagues: 12, baseMs: 780, accel: 1.8, motifs: N5, nouveaux: ['lointains'], rafales: 2, feintes: 1, final: true },
-  { niveau: 6, nom: 'Expert', vagues: 14, baseMs: 700, accel: 1.8, motifs: N5, nouveaux: [], rafales: 3, feintes: 2, final: true },
+  { niveau: 1, nom: 'Échauffement', vagues: 7, baseMs: 680, accel: 1.6, motifs: N1, nouveaux: N1, rafales: 1, feintes: 0, final: false },
+  { niveau: 2, nom: 'Croisements', vagues: 8, baseMs: 620, accel: 1.65, motifs: N2, nouveaux: ['diagonales'], rafales: 1, feintes: 1, final: false },
+  { niveau: 3, nom: 'Embrouilles', vagues: 9, baseMs: 565, accel: 1.7, motifs: N3, nouveaux: ['serpent', 'miroir'], rafales: 1, feintes: 1, final: false },
+  { niveau: 4, nom: 'Grand mix', vagues: 10, baseMs: 515, accel: 1.7, motifs: N4, nouveaux: ['lointains'], rafales: 2, feintes: 1, final: true },
+  { niveau: 5, nom: 'Tempête', vagues: 12, baseMs: 470, accel: 1.8, motifs: N4, nouveaux: [], rafales: 2, feintes: 2, final: true },
+  { niveau: 6, nom: 'Expert', vagues: 14, baseMs: 430, accel: 1.8, motifs: N4, nouveaux: [], rafales: 3, feintes: 2, final: true },
 ]
 /** Suite de motifs : les nouveautés du niveau apparaissent, jamais deux fois le même motif d'affilée. */
 export function motifSequence(level: Level, rng: Rng): MotifId[] {
@@ -320,13 +321,12 @@ function tryTags(level: Level, rng: Rng): Tag[] {
 export function buildPlan(level: Level, rng: Rng = Math.random, ambStart = 0): WavePlan[] {
   const seq = motifSequence(level, rng), tags = tempoTags(level, rng), n = level.vagues
   let amb = ambStart
-  const finalDur = Math.max(MIN_DUR, baseDuration(level, n - 1) / 2)
+  const finalDur = Math.max(FINAL_MIN, baseDuration(level, n - 1) / 2)
   return seq.map((motif, i) => {
     const b = baseDuration(level, i), tag = tags[i]
     let dur = tag === 'rafale' ? Math.max(MIN_DUR, b / 2) : tag === 'feinte' ? b * 1.8 : tag === 'final' ? finalDur
       : b * (level.niveau >= 4 ? 0.85 + rng() * 0.35 : 0.92 + rng() * 0.16)
-    if (level.niveau === 1 && motif === 'cercle') dur *= 1.15
-    dur = Math.round(Math.min(MAX_DUR, Math.max(tag === 'normal' ? finalDur : MIN_DUR, dur)))
+    dur = Math.round(Math.min(MAX_DUR, Math.max(tag === 'normal' ? LISIBLE : tag === 'final' ? FINAL_MIN : MIN_DUR, dur)))
     const nextRafale = tags[i + 1] === 'rafale'
     const pause = i === n - 1 ? 0 : tag === 'rafale' ? (nextRafale ? 60 : 480) : tag === 'final' ? 50 : Math.round(dur * 0.12)
     const move = generateMove(motif, rng, amb); amb = move.cars[amb].to
@@ -336,7 +336,7 @@ export function buildPlan(level: Level, rng: Rng = Math.random, ambStart = 0): W
 /** Vitrine : chaque motif une fois, tempo calme (pour la démo et la vidéo best-of). */
 export function buildVitrine(rng: Rng = Math.random, ambStart = 0): WavePlan[] {
   let amb = ambStart
-  return MOTIF_IDS.map(id => { const move = generateMove(id, rng, amb); amb = move.cars[amb].to; return { move, dur: 1150, pause: 650, ease: 'std' as EaseId, tag: 'normal' as Tag } })
+  return MOTIF_IDS.map(id => { const move = generateMove(id, rng, amb); amb = move.cars[amb].to; return { move, dur: 850, pause: 500, ease: 'std' as EaseId, tag: 'normal' as Tag } })
 }
 export const applyPlan = (pos: number[], plan: WavePlan[]) => plan.reduce((p, w) => p.map(c => w.move.cars[c].to), pos)
 export function scoreFor(level: Level, reactionMs: number) {
