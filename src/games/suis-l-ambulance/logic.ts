@@ -75,9 +75,17 @@ export type MotifId = 'voisines' | 'cercle' | 'carrousel' | 'diagonales' | 'tapi
 export interface CarMove { to: number; path: Path; layer: Layer; angles: number[] }
 /** cars[case de départ] = déplacement de la voiture qui s'y trouve. */
 export interface Move { motif: MotifId; variante: string; cars: CarMove[] }
-type Draft = { to: number; path: Path; layer?: Layer }[]
+type Draft = { to: number; path: Path; layer?: Layer; win?: [number, number] }[]
+/** Fenêtre temporelle : la voiture ne bouge que pendant [a, b] de la vague (décalage entre croisements). */
+export const DIAG_DECALAGE = 0.2
+const clamp01 = (u: number) => Math.min(1, Math.max(0, u))
 const finish = (motif: MotifId, variante: string, d: Draft): Move =>
-  ({ motif, variante, cars: d.map(m => ({ to: m.to, path: m.path, layer: m.layer ?? 0, angles: headings(m.path) })) })
+  ({ motif, variante, cars: d.map(m => {
+    const h = headings(m.path)
+    if (!m.win) return { to: m.to, path: m.path, layer: m.layer ?? 0, angles: h }
+    const [a, b] = m.win, base = m.path, u = (s: number) => clamp01((s - a) / (b - a))
+    return { to: m.to, path: (s: number) => base(u(s)), layer: m.layer ?? 0, angles: Array.from({ length: ANGLE_SAMPLES + 1 }, (_, i) => angleAt(h, u(i / ANGLE_SAMPLES))) }
+  }) })
 
 /** Les 11 pavages de la grille par 6 paires voisines. */
 export const TILINGS: [number, number][][] = (() => {
@@ -146,8 +154,10 @@ export const MOTIFS: Record<MotifId, { nom: string; gen: (rng: Rng) => Move }> =
       const top: Layer = rng() < 0.5 ? 1 : -1, bot = -top as Layer
       pairSwap(d, cellAt(c0, r0), cellAt(c0 + 1, r0 + 1), 0.26 * sgn(rng), top)
       pairSwap(d, cellAt(c0 + 1, r0), cellAt(c0, r0 + 1), 0.26 * sgn(rng), bot)
-      // la diagonale « dessus » passe le centre un peu avant l'autre : elles ne se superposent jamais en entier
-      for (const c of [cellAt(c0, r0), cellAt(c0 + 1, r0), cellAt(c0, r0 + 1), cellAt(c0 + 1, r0 + 1)]) d[c].path = warp(d[c].path, d[c].layer === 1 ? 0.78 : 1.28)
+      // les deux croisements du bloc sont décalés dans le temps (~18 % de la vague) : pas d'amas au centre
+      const first = rng() < 0.5
+      for (const c of [cellAt(c0, r0), cellAt(c0 + 1, r0 + 1)]) d[c].win = first ? [0, 1 - DIAG_DECALAGE] : [DIAG_DECALAGE, 1]
+      for (const c of [cellAt(c0 + 1, r0), cellAt(c0, r0 + 1)]) d[c].win = first ? [DIAG_DECALAGE, 1] : [0, 1 - DIAG_DECALAGE]
     }
     const out = left ? 1 : -1
     pairSwap(d, cellAt(spare, 0), cellAt(spare, 1), 0); pairSwap(d, cellAt(spare, 2), cellAt(spare, 3), 0)

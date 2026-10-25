@@ -117,3 +117,23 @@ describe('niveaux et séquences', () => {
     expect(s.map(e => e.nom)).toEqual(['C', 'B', 'A'])
   })
 })
+
+describe('diagonales en X : croisements décalés', () => {
+  it('les 4 voitures d\'un bloc ne sont jamais réunies au centre en même temps', () => {
+    const rng = mulberry32(99)
+    for (let k = 0; k < 40; k++) {
+      const m = generateMove('diagonales', rng)
+      // blocs 2×2 : repérés par les voitures qui changent de ligne ET de colonne
+      const diag = m.cars.map((c, i) => ({ i, c })).filter(({ i, c }) => i % 3 !== c.to % 3 && Math.floor(i / 3) !== Math.floor(c.to / 3))
+      expect(diag).toHaveLength(8)
+      for (const r0 of [0, 2]) {
+        const bloc = diag.filter(({ i }) => Math.floor(i / 3) === r0 || Math.floor(i / 3) === r0 + 1)
+        const cx = bloc.reduce((s, { i }) => s + pt(i).x, 0) / 4, cy = bloc.reduce((s, { i }) => s + pt(i).y, 0) / 4
+        for (let t = 0; t <= 100; t++) {
+          const proches = bloc.filter(({ c }) => { const p = c.path(t / 100); return Math.hypot(p.x - cx, p.y - cy) < 0.3 }).length
+          expect(proches).toBeLessThanOrEqual(3)
+        }
+      }
+    }
+  })
+})
